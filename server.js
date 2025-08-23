@@ -6,7 +6,9 @@ import rateLimit from "express-rate-limit";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import fs from "fs";
-import pkg from "./package.json" with { type: "json" };
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json"); // no warning
 
 // Routers
 import makeSizesRouter from "./routes/sizes.js";
@@ -44,8 +46,8 @@ app.use(express.json({ limit: `${MAX_BODY_MB}mb` }));
 // Logging
 app.use(pinoHttp({ logger: log }));
 
-// Health (inline, before limiter)
-app.get("/healthz", (_req, res) => {
+// put this BEFORE the limiter
+app.get(["/health", "/_health", "/__health", "/healthz", "/__lbheartbeat__"], (_req, res) => {
   res.json({
     ok: true,
     service: "idphoto-backend",
@@ -124,9 +126,9 @@ if (process.env.AI_WARMUP !== "0") {
   (async () => {
     try {
       const tiny = Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
-        "base64"
-      ); // 1x1 PNG
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5dC6YAAAAASUVORK5CYII=",
+  "base64"
+); // 1x1 PNG
       await removeBgAI(tiny, { bgColor: "transparent" });
       console.log("AI matting warm-up OK");
     } catch (e) {
