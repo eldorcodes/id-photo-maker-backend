@@ -1,0 +1,94 @@
+{
+  "US:passport": {
+    "label": "US Passport",
+    "mm": { "w": 50.8, "h": 50.8 },
+    "px": {
+      "dpi300": { "w": 600, "h": 600 },
+      "dpi600": { "w": 1200, "h": 1200 }
+    },
+    "bg": ["white"],
+    "head_mm_min": 25,
+    "head_mm_max": 35,
+    "eye_line_mm_from_bottom": { "min": 28, "max": 35 }
+  },
+  "EU:schengen-visa": {
+    "label": "EU Schengen Visa",
+    "mm": { "w": 35, "h": 45 },
+    "px": {
+      "dpi300": { "w": 413, "h": 531 },
+      "dpi600": { "w": 827, "h": 1063 }
+    },
+    "bg": ["white", "light-gray"],
+    "head_mm_min": 31,
+    "head_mm_max": 36
+  },
+  "UK:passport": {
+    "label": "UK Passport",
+    "mm": { "w": 35, "h": 45 },
+    "px": {
+      "dpi300": { "w": 413, "h": 531 },
+      "dpi600": { "w": 827, "h": 1063 }
+    },
+    "bg": ["light-gray", "white"],
+    "head_mm_min": 29,
+    "head_mm_max": 34
+  },
+  "IN:passport": {
+    "label": "India Passport",
+    "mm": { "w": 51, "h": 51 },
+    "px": {
+      "dpi300": { "w": 602, "h": 602 },
+      "dpi600": { "w": 1204, "h": 1204 }
+    },
+    "bg": ["white"],
+    "head_mm_min": 25,
+    "head_mm_max": 35
+  },
+  "CA:passport": {
+    "label": "Canada Passport",
+    "mm": { "w": 50, "h": 70 },
+    "px": {
+      "dpi300": { "w": 591, "h": 827 },
+      "dpi600": { "w": 1181, "h": 1654 }
+    },
+    "bg": ["white"],
+    "head_mm_min": 31,
+    "head_mm_max": 36
+  },
+  "CN:visa": {
+    "label": "China Visa",
+    "mm": { "w": 33, "h": 48 },
+    "px": {
+      "dpi300": { "w": 390, "h": 567 },
+      "dpi600": { "w": 780, "h": 1134 }
+    },
+    "bg": ["white", "light-blue"],
+    "head_mm_min": 28,
+    "head_mm_max": 33
+  },
+  "UZ:resume": {
+    "label": "Resume (Square)",
+    "mm": { "w": 35, "h": 35 },
+    "px": {
+      "dpi300": { "w": 413, "h": 413 },
+      "dpi600": { "w": 827, "h": 827 }
+    },
+    "bg": ["white", "light-gray", "light-blue"]
+  },
+  "US:dv-lottery": {
+    "label": "US Green Card Lottery (DV)",
+    "mm": { "w": 50.8, "h": 50.8 },
+    "px": {
+      "digital": {
+        "min": { "w": 600, "h": 600 },
+        "max": { "w": 1200, "h": 1200 },
+        "default": { "w": 600, "h": 600 }
+      }
+    },
+    "bg": ["white", "off-white"],
+    "rules": {
+      "head_pct": { "min": 0.50, "max": 0.69 },
+      "eyes_from_bottom_pct": { "min": 0.56, "max": 0.69 }
+    }
+  }
+}
