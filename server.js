@@ -6,10 +6,9 @@ import rateLimit from "express-rate-limit";
 import pino from "pino";
 import pinoHttp from "pino-http";
 import fs from "fs";
-import pkg from "./package.json" assert { type: "json" };
+import pkg from "./package.json" with { type: "json" };
 
 // Routers
-import healthRouter from "./routes/health.js";
 import makeSizesRouter from "./routes/sizes.js";
 import bgRemoveRouter from "./routes/bg-remove.js";
 import composePdfRouter from "./routes/compose-pdf.js";
@@ -21,16 +20,17 @@ import selftestLiteRouter from "./routes/selftest-lite.js";
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
 const app = express();
 
-// Behind Cloud Run / proxies
+// Cloud Run / proxies
 app.set("trust proxy", true);
+app.disable("x-powered-by");
 
-// Limits — Cloud Run max body ~32MB. Base64 expands; keep request JSON <= 32 MB.
+// Limits — Cloud Run max body ~32MB. Base64 expands; keep <= 32MB.
 const MAX_BODY_MB = Math.min(Number(process.env.MAX_BODY_MB || 30), 32);
 
 // Security
 app.use(
   helmet({
-    crossOriginResourcePolicy: false, // if you ever serve images
+    crossOriginResourcePolicy: false,
   })
 );
 
@@ -44,14 +44,24 @@ app.use(express.json({ limit: `${MAX_BODY_MB}mb` }));
 // Logging
 app.use(pinoHttp({ logger: log }));
 
-// Response meta headers (useful in prod)
+// Health (inline, before limiter)
+app.get("/healthz", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "idphoto-backend",
+    revision: process.env.K_REVISION || "local",
+    time: Date.now(),
+  });
+});
+
+// Response meta headers
 app.use((req, res, next) => {
   res.setHeader("X-Revision", process.env.K_REVISION || "local");
   res.setHeader("X-Service", process.env.K_SERVICE || "local");
   next();
 });
 
-// Rate limit (skip health + selftest to avoid cold‑start flakiness)
+// Rate limit (skip health + selftests)
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
@@ -76,15 +86,15 @@ try {
 }
 
 // Routes
-app.use(healthRouter);                // GET /healthz
-app.use(makeSizesRouter(SIZES));      // GET /sizes
-app.use(bgRemoveRouter);              // POST /bg-remove
-app.use(composePdfRouter);            // POST /compose-pdf
-app.use("/api", composeRoutes);       // POST /api/compose
-app.use("/", selftestRouter);         // GET /bg-remove/selftest
-app.use("/", selftestLiteRouter);     // GET /bg-remove/selftest-lite (no AI)
+app.use(makeSizesRouter(SIZES));   // GET /sizes
+app.use(bgRemoveRouter);           // POST /bg-remove
+app.use(refineMaskRouter);         // POST /refine-mask
+app.use(composePdfRouter);         // POST /compose-pdf
+app.use("/api", composeRoutes);    // POST /api/compose
+app.use("/", selftestRouter);      // GET /bg-remove/selftest
+app.use("/", selftestLiteRouter);  // GET /bg-remove/selftest-lite
 
-// Root (simple JSON to prove our code is serving)
+// Root (simple JSON)
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
@@ -103,30 +113,29 @@ app.use((req, res) => {
 // Error handler
 app.use((err, req, res, _next) => {
   req.log?.error?.(err, "unhandled");
-  res.status(err.status || 500).json({
-    ok: false,
-    error: err.message || "internal_error",
-  });
+  res
+    .status(err.status || 500)
+    .json({ ok: false, error: err.message || "internal_error" });
 });
 
-// --- Warm-up AI model once (helps avoid first-request 503 on Cloud Run) ---
+// --- Warm-up AI model once (optional; set AI_WARMUP=0 to skip) ---
 import { removeBgAI } from "./src/aiMatting.js";
+if (process.env.AI_WARMUP !== "0") {
+  (async () => {
+    try {
+      const tiny = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
+        "base64"
+      ); // 1x1 PNG
+      await removeBgAI(tiny, { bgColor: "transparent" });
+      console.log("AI matting warm-up OK");
+    } catch (e) {
+      console.error("AI matting warm-up failed:", e?.message || e);
+    }
+  })();
+}
 
-(async () => {
-  try {
-    const tiny = Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
-      "base64"
-    ); // 1x1 PNG
-    await removeBgAI(tiny, { bgColor: "transparent" });
-    console.log("AI matting warm-up OK");
-  } catch (e) {
-    console.error("AI matting warm-up failed:", e?.message || e);
-  }
-})();
-
-// Start server
 const port = process.env.PORT || 8080;
 app.listen(port, "0.0.0.0", () => log.info({ port }, "idphoto backend up"));
 
-export default app; // for tests
+export default app;
