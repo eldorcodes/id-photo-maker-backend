@@ -121,14 +121,16 @@ app.use((err, req, res, _next) => {
 });
 
 // --- Warm-up AI model once (optional; set AI_WARMUP=0 to skip) ---
-import { removeBgAI } from "./src/aiMatting.js";
+
+// --- Warm-up AI model once (optional; set AI_WARMUP=0 to skip) ---
 if (process.env.AI_WARMUP !== "0") {
   (async () => {
     try {
+      const { removeBgAI } = await import("./src/aiMatting.js"); // lazy import
       const tiny = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO5dC6YAAAAASUVORK5CYII=",
-  "base64"
-); // 1x1 PNG
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
+        "base64"
+      ); // 1x1 PNG
       await removeBgAI(tiny, { bgColor: "transparent" });
       console.log("AI matting warm-up OK");
     } catch (e) {
