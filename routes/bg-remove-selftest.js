@@ -1,31 +1,48 @@
 // routes/bg-remove-selftest.js
-import { Router } from "express";
-import sharp from "sharp";
-import { removeBgAI } from "../src/aiMatting.js";
+import { Router } from 'express';
+import sharp from 'sharp';
+import { removeBgAI } from '../src/aiMatting.js';
 
 const router = Router();
 
-router.get("/bg-remove/selftest", async (req, res) => {
+/**
+ * GET /bg-remove/selftest
+ * - Warms sharp + AI matting
+ * - Returns JSON with timings or an error payload (no HTML 503)
+ */
+router.get('/bg-remove/selftest', async (req, res) => {
+  const t0 = Date.now();
   try {
-    // Create a standard 64x64 PNG buffer (solid gray) — guaranteed valid
-    const dummy = await sharp({
-      create: {
-        width: 64,
-        height: 64,
-        channels: 4,
-        background: { r: 180, g: 180, b: 180, alpha: 1 },
-      },
-    })
-      .png()
-      .toBuffer();
+    // 1x1 PNG
+    const dummy = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==',
+      'base64'
+    );
 
-    // Run the AI pipeline (transparent preview)
-    await removeBgAI(dummy, { bgColor: "transparent" });
+    // Warm sharp (decode+reencode)
+    const tSharp0 = Date.now();
+    await sharp(dummy).toColorspace('srgb').png().toBuffer();
+    const tSharp = Date.now() - tSharp0;
 
-    res.json({ ok: true });
+    // Warm AI path (request transparent so we exercise alpha codepath)
+    const tAI0 = Date.now();
+    await removeBgAI(dummy, { bgColor: 'transparent' });
+    const tAI = Date.now() - tAI0;
+
+    return res.json({
+      ok: true,
+      ms: Date.now() - t0,
+      sharp_ms: tSharp,
+      ai_ms: tAI,
+    });
   } catch (e) {
-    console.error("[/bg-remove/selftest] error:", e);
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
+    // Log full error; respond JSON so callers don’t see HTML 503
+    req.log?.error?.(e, 'selftest error');
+    return res.status(500).json({
+      ok: false,
+      error: e?.message || 'selftest failed',
+      stack: process.env.NODE_ENV === 'production' ? undefined : String(e?.stack || ''),
+    });
   }
 });
 

@@ -1,9 +1,14 @@
 {
   "name": "id-photo-maker-backend",
   "version": "1.0.0",
+  "private": true,
+  "description": "Cloud Run–ready backend for ID Photo Maker",
   "type": "module",
   "main": "server.js",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
@@ -19,5 +24,8 @@
     "pino": "^9.2.0",
     "pino-http": "^9.0.0",
     "sharp": "^0.33.5"
+  },
+  "resolutions": {
+    "onnxruntime-node": "1.20.0"
   }
 }
