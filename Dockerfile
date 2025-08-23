@@ -1,24 +1,31 @@
 # Dockerfile
 FROM node:20-slim
 
-# native deps for sharp (libvips) and a sane init
+# Install native dependencies for:
+# - sharp (libvips)
+# - onnxruntime-node (libgomp1)
+# - sane init (dumb-init)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates dumb-init libvips \
+    ca-certificates \
+    dumb-init \
+    libvips \
+    libgomp1 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
-# install deps first (better layer cache)
+# Install dependencies first (better caching)
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# copy source
+# Copy source code
 COPY . .
 
-# env + process manager
+# Environment and process manager
 ENV NODE_ENV=production \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
-    PORT=8080
+    PORT=8080 \
+    OMP_NUM_THREADS=1
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "server.js"]
