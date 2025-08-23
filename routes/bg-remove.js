@@ -2,18 +2,10 @@
 import { Router } from "express";
 import sharp from "sharp";
 import { simpleBgToWhite } from "../utils/simpleBgToWhite.js";
+import { removeBgAI } from "../src/aiMatting.js";
 
 const router = Router();
-const FORCE_FAST = String(process.env.DISABLE_AI || "0") === "1";
-
-// Lazy loader to avoid crashing the process at startup
-let _removeBgAI = null;
-async function getRemoveBgAI() {
-  if (_removeBgAI) return _removeBgAI;
-  const mod = await import("../src/aiMatting.js"); // loaded only when needed
-  _removeBgAI = mod.removeBgAI;
-  return _removeBgAI;
-}
+const AI_ENABLED = process.env.AI_ENABLED !== "0"; // toggle AI with env var
 
 /**
  * POST /bg-remove
@@ -73,26 +65,23 @@ router.post("/bg-remove", async (req, res) => {
       });
     };
 
-    const allowAI = !FORCE_FAST && quality !== "fast";
+    const allowAI = AI_ENABLED && quality !== "fast";
 
     if (allowAI) {
       try {
-        const removeBgAI = await getRemoveBgAI();
         const aiOut = await removeBgAI(input, {
           bgColor: wantsTransparent ? "transparent" : (bgColor || "#ffffff"),
         });
-        // Success → honor transparency
         return await finalize(aiOut, { transparent: wantsTransparent, mode: "ai" });
       } catch (e) {
         req.log?.warn?.(
           { err: e?.message || String(e) },
           "[/bg-remove] AI failed, falling back to fast"
         );
-        // fall through to fast
       }
     }
 
-    // Fast heuristic fallback (non‑transparent)
+    // Fast heuristic fallback (non-transparent)
     const fastPng = await simpleBgToWhite(input, "png");
     return await finalize(fastPng, {
       transparent: false,
