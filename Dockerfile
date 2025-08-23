@@ -1,31 +1,34 @@
 # Dockerfile
 FROM node:20-slim
 
-# Install native dependencies for:
-# - sharp (libvips)
-# - onnxruntime-node (libgomp1)
-# - sane init (dumb-init)
+# Only what's needed: init + OpenMP for onnxruntime (even if AI is disabled)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     dumb-init \
-    libvips \
     libgomp1 \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
 
-# Install dependencies first (better caching)
+# Ensure sharp uses its bundled libvips (not any system copy)
+ENV SHARP_IGNORE_GLOBAL_LIBVIPS=1
+
+# Install deps first
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy source code
+# Copy source
 COPY . .
 
-# Environment and process manager
+# Runtime env
 ENV NODE_ENV=production \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     PORT=8080 \
-    OMP_NUM_THREADS=1
+    OMP_NUM_THREADS=1 \
+    OMP_WAIT_POLICY=PASSIVE \
+    ORT_NUM_THREADS=1 \
+    MALLOC_ARENA_MAX=2 \
+    AI_WARMUP=0
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "server.js"]
