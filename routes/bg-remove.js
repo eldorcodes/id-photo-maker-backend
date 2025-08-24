@@ -10,7 +10,7 @@ const router = Router();
  * POST /bg-remove
  * Body: {
  *   imageBase64: string (base64; data: prefix allowed),
- *   format?: "png"|"jpg",
+ *   format?: "png"|"jpg"|"jpeg",
  *   quality?: "ai"|"fast" (default: "ai"),
  *   bgColor?: "#ffffff" | "transparent",
  *   transparent_background?: boolean
@@ -33,7 +33,7 @@ router.post("/bg-remove", async (req, res) => {
     } = req.body || {};
 
     if (!imageBase64) {
-      return res.status(400).json({ error: "imageBase64 required" });
+      return res.status(400).json({ ok: false, error: "imageBase64 required" });
     }
 
     const wantsTransparent = !!transparent_background;
@@ -56,7 +56,7 @@ router.post("/bg-remove", async (req, res) => {
         let pipeline = sharp(outAI).toColorspace("srgb");
 
         if (wantsTransparent) {
-          // Always return PNG with alpha when transparent was requested
+          // Always return PNG with alpha when transparency was requested
           pipeline = pipeline.ensureAlpha().png({ compressionLevel: 9 });
         } else if (requestedFmt === "jpg" || requestedFmt === "jpeg") {
           pipeline = pipeline
@@ -68,6 +68,7 @@ router.post("/bg-remove", async (req, res) => {
 
         const finalBuf = await pipeline.withMetadata({ orientation: 1 }).toBuffer();
         return res.json({
+          ok: true,
           imageBase64: finalBuf.toString("base64"),
           mode: "ai",
           transparent: wantsTransparent,
@@ -98,6 +99,7 @@ router.post("/bg-remove", async (req, res) => {
       .toBuffer();
 
     return res.json({
+      ok: true,
       imageBase64: finalFast.toString("base64"),
       mode: "fast",
       transparent: false,
@@ -106,6 +108,7 @@ router.post("/bg-remove", async (req, res) => {
   } catch (e) {
     console.error("[/bg-remove] fatal:", e);
     return res.status(500).json({
+      ok: false,
       error: "bg-remove failed",
       details: e?.message || String(e),
     });
