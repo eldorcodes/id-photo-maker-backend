@@ -1,17 +1,31 @@
 // src/aiMatting.js
+import fs from "fs";
+import path from "path";
+import os from "os";
 import sharp from "sharp";
 import { removeBackground } from "@imgly/background-removal-node";
+
+/**
+ * IMPORTANT (Cloud Run):
+ * - The container filesystem is read-only except for /tmp.
+ * - Many ML libs cache/download model assets into TMP/CACHE dirs.
+ * - We hard-point all temp/cache paths to a writable dir (default: /tmp/ai-models).
+ */
+const MODEL_DIR =
+  process.env.MODEL_DIR ||
+  process.env.RUNTIME_DIR ||
+  path.join(os.tmpdir(), "ai-models");
+
+ensureWritableDir(MODEL_DIR);
+
+// Point common temp/cache envs at the writable dir so the library can persist assets.
+bootstrapTempEnv(MODEL_DIR);
 
 /** Tiny magic-byte check to detect PNG/JPEG */
 function sniffMime(buf) {
   if (!buf || buf.length < 4) return null;
-  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
-  if (
-    buf[0] === 0x89 &&
-    buf[1] === 0x50 &&
-    buf[2] === 0x4e &&
-    buf[3] === 0x47
-  ) {
+  // PNG signature: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
     return "image/png";
   }
   // JPEG signature: FF D8 FF
@@ -19,6 +33,35 @@ function sniffMime(buf) {
     return "image/jpeg";
   }
   return null;
+}
+
+function ensureWritableDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    // quick write test (defensive on read-only root)
+    const testFile = path.join(dir, ".rwcheck");
+    fs.writeFileSync(testFile, "ok");
+    fs.unlinkSync(testFile);
+  } catch (e) {
+    // If this ever happens on Cloud Run, the AI step will fail. We keep going so
+    // the route can fall back to the fast path without 5xx.
+    console.warn("[aiMatting] Failed to prepare model dir:", dir, e?.message || e);
+  }
+}
+
+function bootstrapTempEnv(dir) {
+  const defaults = {
+    TMPDIR: dir,
+    TEMP: dir,
+    TMP: dir,
+    XDG_CACHE_HOME: dir,
+    XDG_CONFIG_HOME: dir,
+    HOME: process.env.HOME || dir, // some libs use $HOME/.cache
+    // Library-specific envs can be added here if needed in the future.
+  };
+  for (const [k, v] of Object.entries(defaults)) {
+    if (!process.env[k]) process.env[k] = v;
+  }
 }
 
 /**
@@ -33,15 +76,20 @@ export async function removeBgAI(inputBuf, { bgColor = "#ffffff" } = {}) {
   }
 
   // Wrap as Blob with an explicit MIME so the library doesn't complain.
-  let mime = sniffMime(inputBuf);
-  // If unknown, default to PNG (the library just needs a valid type hint).
-  if (!mime) mime = "image/png";
-
-  // Node 18+ has global Blob
+  let mime = sniffMime(inputBuf) || "image/png";
   const blobIn = new Blob([inputBuf], { type: mime });
 
-  // Ask the library to remove background; result is a Blob (PNG)
-  const blobOut = await removeBackground(blobIn);
+  // Run background removal (library returns a PNG Blob).
+  // If the library needs to fetch/cache models, it will use the writable dirs we set above.
+  let blobOut;
+  try {
+    blobOut = await removeBackground(blobIn /*, options if you later need */);
+  } catch (e) {
+    // Let the route decide to fall back to the fast path (no 5xx back to the app).
+    // Keep the error message clear for logs.
+    throw new Error(`[aiMatting] removeBackground failed: ${e?.message || e}`);
+  }
+
   const cutoutPng = Buffer.from(await blobOut.arrayBuffer());
 
   // Normalize to sRGB and output per requested bgColor

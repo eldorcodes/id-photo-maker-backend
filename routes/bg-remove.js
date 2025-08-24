@@ -111,14 +111,9 @@ router.post("/bg-remove", async (req, res) => {
         });
         return await finalize(outAI, { transparent: wantsTransparent, mode: "ai" });
       } catch (e) {
-        if (wantsTransparent) {
-          return res.status(502).json({
-            ok: false, error: "ai_unavailable",
-            details: e?.message || "AI matting failed",
-            ms: Date.now() - started,
-          });
-        }
-        req.log?.warn?.({ err: e?.message || String(e) }, "[/bg-remove] AI failed, using fast fallback");
+  // 🔸 NEW: no 502; log and continue to fast fallback
+        req.log?.warn?.({ err: e?.message || String(e) }, "[/bg-remove] AI failed -> fast fallback");
+        // fall through to fast path below
       }
     }
 
