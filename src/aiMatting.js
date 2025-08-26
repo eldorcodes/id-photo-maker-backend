@@ -1,108 +1,93 @@
 // src/aiMatting.js
-import fs from "fs";
-import path from "path";
-import os from "os";
+// Local AI matting via rembg (U²-Net) using a tiny Python shim.
+// No Replicate, no CLI deps. Requires Python 3.8–3.12 + `pip install rembg`.
+
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import sharp from "sharp";
-import { removeBackground } from "@imgly/background-removal-node";
 
-/**
- * IMPORTANT (Cloud Run):
- * - The container filesystem is read-only except for /tmp.
- * - Many ML libs cache/download model assets into TMP/CACHE dirs.
- * - We hard-point all temp/cache paths to a writable dir (default: /tmp/ai-models).
- */
-const MODEL_DIR =
-  process.env.MODEL_DIR ||
-  process.env.RUNTIME_DIR ||
-  path.join(os.tmpdir(), "ai-models");
+// Resolve the shim path regardless of where node is launched from
+const SHIM_PATH = path.resolve(process.cwd(), "scripts", "rembg_stdin.py");
 
-ensureWritableDir(MODEL_DIR);
+function pickPython() {
+  // 1) explicit Python (recommended): export REMBG_PY=/path/to/.venv/bin/python3.12
+  const py = process.env.REMBG_PY;
+  if (py && fs.existsSync(py)) return py;
 
-// Point common temp/cache envs at the writable dir so the library can persist assets.
-bootstrapTempEnv(MODEL_DIR);
-
-/** Tiny magic-byte check to detect PNG/JPEG */
-function sniffMime(buf) {
-  if (!buf || buf.length < 4) return null;
-  // PNG signature: 89 50 4E 47
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-    return "image/png";
+  // 2) fallbacks that usually exist on macOS/Homebrew setups
+  const guesses = ["/opt/homebrew/bin/python3.12", "/usr/bin/python3", "python3", "python"];
+  for (const g of guesses) {
+    try {
+      // not perfect, but we only need one that exists
+      if (fs.existsSync(g) || g.startsWith("python")) return g;
+    } catch {}
   }
-  // JPEG signature: FF D8 FF
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-    return "image/jpeg";
-  }
-  return null;
+  return "python3";
 }
 
-function ensureWritableDir(dir) {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    // quick write test (defensive on read-only root)
-    const testFile = path.join(dir, ".rwcheck");
-    fs.writeFileSync(testFile, "ok");
-    fs.unlinkSync(testFile);
-  } catch (e) {
-    // If this ever happens on Cloud Run, the AI step will fail. We keep going so
-    // the route can fall back to the fast path without 5xx.
-    console.warn("[aiMatting] Failed to prepare model dir:", dir, e?.message || e);
-  }
-}
+async function runRembg(inputBuf, { transparent = false, bg = "#ffffff", timeoutMs = 120000 } = {}) {
+  if (!Buffer.isBuffer(inputBuf)) throw new Error("runRembg: input must be a Buffer");
+  if (!fs.existsSync(SHIM_PATH)) throw new Error(`rembg shim not found at ${SHIM_PATH}`);
 
-function bootstrapTempEnv(dir) {
-  const defaults = {
-    TMPDIR: dir,
-    TEMP: dir,
-    TMP: dir,
-    XDG_CACHE_HOME: dir,
-    XDG_CONFIG_HOME: dir,
-    HOME: process.env.HOME || dir, // some libs use $HOME/.cache
-    // Library-specific envs can be added here if needed in the future.
-  };
-  for (const [k, v] of Object.entries(defaults)) {
-    if (!process.env[k]) process.env[k] = v;
-  }
-}
+  // Normalize to sRGB PNG first; rembg performs best with this
+  const pngIn = await sharp(inputBuf).toColorspace("srgb").png().toBuffer();
 
-/**
- * removeBgAI(buffer, { bgColor })
- * Returns a **PNG buffer**:
- *  - If bgColor === "transparent"  → PNG with real alpha (subject cut‑out).
- *  - Otherwise                     → PNG flattened onto the specified bg color.
- */
-export async function removeBgAI(inputBuf, { bgColor = "#ffffff" } = {}) {
-  if (!Buffer.isBuffer(inputBuf)) {
-    throw new Error("removeBgAI: input must be a Buffer");
-  }
+  const py = pickPython();
+  const args = ["-u", SHIM_PATH];
+  const child = spawn(py, args, { stdio: ["pipe", "pipe", "pipe"] });
 
-  // Wrap as Blob with an explicit MIME so the library doesn't complain.
-  let mime = sniffMime(inputBuf) || "image/png";
-  const blobIn = new Blob([inputBuf], { type: mime });
+  const outChunks = [];
+  const errChunks = [];
+  let closed = false;
 
-  // Run background removal (library returns a PNG Blob).
-  // If the library needs to fetch/cache models, it will use the writable dirs we set above.
-  let blobOut;
-  try {
-    blobOut = await removeBackground(blobIn /*, options if you later need */);
-  } catch (e) {
-    // Let the route decide to fall back to the fast path (no 5xx back to the app).
-    // Keep the error message clear for logs.
-    throw new Error(`[aiMatting] removeBackground failed: ${e?.message || e}`);
+  const killTimer = setTimeout(() => { if (!closed) child.kill("SIGKILL"); }, timeoutMs);
+
+  child.stdout.on("data", d => outChunks.push(d));
+  child.stderr.on("data", d => errChunks.push(d));
+
+  const done = new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", code => {
+      clearTimeout(killTimer);
+      closed = true;
+      if (code !== 0) {
+        return reject(new Error(`rembg_shim_exit_${code}: ${Buffer.concat(errChunks).toString() || "unknown"}`));
+      }
+      resolve(Buffer.concat(outChunks));
+    });
+  });
+
+  child.stdin.write(pngIn);
+  child.stdin.end();
+
+  const cutoutPng = await done;               // PNG with alpha from rembg
+
+  if (!cutoutPng || cutoutPng.length === 0) { // guard (seen when CLI deps were missing)
+    throw new Error("rembg_empty_output");
   }
 
-  const cutoutPng = Buffer.from(await blobOut.arrayBuffer());
-
-  // Normalize to sRGB and output per requested bgColor
+  // Return transparent cut-out, or flattened on a bg
   const img = sharp(cutoutPng).toColorspace("srgb");
+  return (transparent)
+    ? img.ensureAlpha().png({ compressionLevel: 9 }).toBuffer()
+    : img.flatten({ background: bg || "#ffffff" }).png({ compressionLevel: 9 }).toBuffer();
+}
 
-  if (bgColor === "transparent") {
-    // keep transparency for preview
-    return img.ensureAlpha().png({ compressionLevel: 9 }).toBuffer();
+/** Public API — same signature the rest of your code uses. */
+export async function removeBgAI(inputBuf, { bgColor = "#ffffff" } = {}) {
+  return runRembg(inputBuf, { transparent: bgColor === "transparent", bg: bgColor });
+}
+
+/** Optional warmup to pre-download models. Safe to leave enabled. */
+export async function warmupAIMatting(sampleBuffer) {
+  try {
+    const buf =
+      sampleBuffer ||
+      Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO1mM2kAAAAASUVORK5CYII=", "base64");
+    await runRembg(buf, { transparent: true, timeoutMs: 180000 });
+    console.log("AI matting warm-up: ready (rembg cached).");
+  } catch (e) {
+    console.warn("AI warm-up skipped:", e.message);
   }
-
-  // bake onto a solid background for export (no alpha)
-  return img
-    .flatten({ background: bgColor || "#ffffff" })
-    .png({ compressionLevel: 9 })
-    .toBuffer();
 }

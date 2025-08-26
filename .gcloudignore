@@ -1,0 +1,11 @@
+# Keep typical ignores…
+node_modules/
+npm-debug.log
+.git/
+.gitignore
+
+# BUT force-include our scripts and server files
+!scripts/**
+!routes/**
+!src/**
+!server.js

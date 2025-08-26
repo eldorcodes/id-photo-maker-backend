@@ -5,7 +5,7 @@
   "main": "server.js",
   "license": "MIT",
   "scripts": {
-    "start": "node server.js",
+    "start": "cross-env REMBG_PY=.venv312/bin/python3.12 AI_WARMUP=0 node server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
@@ -22,5 +22,8 @@
   },
   "overrides": {
     "onnxruntime-node": "1.20.0"
+  },
+  "devDependencies": {
+    "cross-env": "^10.0.0"
   }
 }

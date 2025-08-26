@@ -1,1 +1,5 @@
 node_modules
+.venv*
+.venv312/
+.u2net/
+.cache/

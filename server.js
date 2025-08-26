@@ -8,7 +8,7 @@ import pinoHttp from "pino-http";
 import fs from "fs";
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
-const pkg = require("./package.json"); // no warning
+const pkg = require("./package.json");
 
 // Routers
 import makeSizesRouter from "./routes/sizes.js";
@@ -16,7 +16,7 @@ import bgRemoveRouter from "./routes/bg-remove.js";
 import composePdfRouter from "./routes/compose-pdf.js";
 import composeRoutes from "./routes/compose.js";
 import refineMaskRouter from "./routes/refine-mask.js";
-import selftestRouter from "./routes/bg-remove-selftest.js";
+import selftestRouter from "./routes/bg-remove-selftest.js"; // <-- this file has /selftest + /selftest-ai
 import selftestLiteRouter from "./routes/selftest-lite.js";
 
 const log = pino({ level: process.env.LOG_LEVEL || "info" });
@@ -46,7 +46,7 @@ app.use(express.json({ limit: `${MAX_BODY_MB}mb` }));
 // Logging
 app.use(pinoHttp({ logger: log }));
 
-// put this BEFORE the limiter
+// Health before limiter
 app.get(["/health", "/_health", "/__health", "/healthz", "/__lbheartbeat__"], (_req, res) => {
   res.json({
     ok: true,
@@ -73,7 +73,8 @@ const limiter = rateLimit({
   skip: (req) =>
     req.path === "/healthz" ||
     req.path === "/bg-remove/selftest" ||
-    req.path === "/bg-remove/selftest-lite",
+    req.path === "/bg-remove/selftest-lite" ||
+    req.path === "/bg-remove/selftest-ai", // <-- make sure selftest-AI is not throttled
 });
 app.use(limiter);
 
@@ -93,7 +94,7 @@ app.use(bgRemoveRouter);           // POST /bg-remove
 app.use(refineMaskRouter);         // POST /refine-mask
 app.use(composePdfRouter);         // POST /compose-pdf
 app.use("/api", composeRoutes);    // POST /api/compose
-app.use("/", selftestRouter);      // GET /bg-remove/selftest
+app.use("/", selftestRouter);      // GET /bg-remove/selftest + /bg-remove/selftest-ai
 app.use("/", selftestLiteRouter);  // GET /bg-remove/selftest-lite
 
 // Root (simple JSON)
@@ -115,22 +116,18 @@ app.use((req, res) => {
 // Error handler
 app.use((err, req, res, _next) => {
   req.log?.error?.(err, "unhandled");
-  res
-    .status(err.status || 500)
-    .json({ ok: false, error: err.message || "internal_error" });
+  res.status(err.status || 500).json({ ok: false, error: err.message || "internal_error" });
 });
 
-// --- Warm-up AI model once (optional; set AI_WARMUP=0 to skip) ---
-
-// --- Warm-up AI model once (optional; set AI_WARMUP=0 to skip) ---
+// Optional AI warm-up (set AI_WARMUP=0 to skip)
 if (process.env.AI_WARMUP !== "0") {
   (async () => {
     try {
-      const { removeBgAI } = await import("./src/aiMatting.js"); // lazy import
+      const { removeBgAI } = await import("./src/aiMatting.js");
       const tiny = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGMAAQAABQABDQottAAAAABJRU5ErkJggg==",
         "base64"
-      ); // 1x1 PNG
+      );
       await removeBgAI(tiny, { bgColor: "transparent" });
       console.log("AI matting warm-up OK");
     } catch (e) {
