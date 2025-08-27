@@ -1,6 +1,19 @@
+# .dockerignore
 node_modules
-npm-debug.log
-Dockerfile
+.venv
+.venv*/
+**/__pycache__
+*.pyc
 .git
 .gitignore
-README.md
+*.log
+*.tgz
+dist
+build
+android
+ios
+*.iml
+.DS_Store
+# large local caches
+**/.u2net
+**/.cache
